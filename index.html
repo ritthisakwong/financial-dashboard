@@ -753,6 +753,28 @@
   /* Password gate */
   body:not(.fcc-authed) > *:not(#passGate) { display: none !important; }
   body.fcc-authed #passGate { display: none !important; }
+
+  /* AI chat assistant */
+  .chat-bubble {
+    max-width: 80%;
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .chat-bubble.user { align-self: flex-end; border-color: var(--accent2); }
+  .chat-bubble.assistant { align-self: flex-start; }
+  .chat-bubble.thinking { opacity: 0.6; font-style: italic; }
+  @media (max-width: 640px) {
+    .chat-bubble { max-width: 92%; }
+    .chat-input-row { flex-wrap: wrap; }
+    .chat-input-row #chatInput { min-width: 100%; order: 1; }
+    .chat-input-row #chatSendBtn { order: 2; flex: 1; }
+  }
 </style>
 </head>
 <body>
@@ -824,6 +846,19 @@
         <span class="label">Save / Invest</span>
         <span class="value green" id="totalSavings">฿0</span>
       </div>
+    </div>
+  </div>
+
+  <!-- AI Assistant -->
+  <div class="card" style="margin-bottom:32px;">
+    <div class="card-title">
+      AI Assistant — Chat Updates
+      <span class="dot blue"></span>
+    </div>
+    <div id="chatLog" style="display:flex; flex-direction:column; gap:8px; max-height:260px; overflow-y:auto; margin-bottom:14px; padding-right:4px;"></div>
+    <div class="chat-input-row" style="display:flex; gap:8px; align-items:center;">
+      <input type="text" id="chatInput" placeholder="e.g. Log ฿5,000 loan payment, or I spent 800 on food today" autocomplete="off" style="flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:'DM Sans',sans-serif; font-size:0.85rem; padding:10px 14px; outline:none; box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();sendChatMessage();}">
+      <button id="chatSendBtn" onclick="sendChatMessage()" class="btn btn-primary" style="padding:10px 20px; font-size:0.8rem; flex-shrink:0;">Send</button>
     </div>
   </div>
 
@@ -1592,17 +1627,28 @@ function closeProjectModal() {
   document.getElementById('projectModal').classList.remove('active');
 }
 
-function addProject() {
-  const name = document.getElementById('projName').value.trim();
-  const icon = document.getElementById('projType').value;
-  const target = parseInt(document.getElementById('projTarget').value) || 0;
-  const months = parseInt(document.getElementById('projMonths').value) || 1;
-  const saved = parseInt(document.getElementById('projSaved').value) || 0;
-
-  if (!name || !target) return;
-
-  state.projects.push({ name, icon, target, months, saved });
+function applyProject(name, icon, target, months, saved) {
+  name = (name || '').trim();
+  target = parseInt(target) || 0;
+  months = parseInt(months) || 1;
+  saved = parseInt(saved) || 0;
+  icon = icon || '🎁';
+  if (!name || !target) return null;
+  const project = { name, icon, target, months, saved };
+  state.projects.push(project);
   renderProjects();
+  return project;
+}
+
+function addProject() {
+  const name = document.getElementById('projName').value;
+  const icon = document.getElementById('projType').value;
+  const target = document.getElementById('projTarget').value;
+  const months = document.getElementById('projMonths').value;
+  const saved = document.getElementById('projSaved').value;
+
+  const project = applyProject(name, icon, target, months, saved);
+  if (!project) return;
   recalculate();
   closeProjectModal();
 
@@ -1852,15 +1898,15 @@ removeProject = function(i) {
 // ═══════════════════════════════════════════════
 // LOAN PAYMENT LOGGER
 // ═══════════════════════════════════════════════
-function logLoanPayment() {
-  const amt = parseFloat(document.getElementById('loanPayAmt').value);
-  const note = document.getElementById('loanPayNote').value.trim();
-  if (!amt || amt <= 0) return;
+// Core mutation — usable by both the manual form and the AI chat assistant
+function applyLoanPayment(amt, note) {
+  amt = parseFloat(amt);
+  if (!amt || amt <= 0) return null;
 
   const payment = {
     date: new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'2-digit' }),
     amount: amt,
-    note: note || ''
+    note: (note || '').trim()
   };
   state.loanPayments.unshift(payment); // newest first
 
@@ -1868,11 +1914,20 @@ function logLoanPayment() {
   const loan = state.debts.find(d => d.isLoan);
   if (loan) loan.balance = Math.max(0, loan.balance - amt);
 
+  renderDebtList();
+  renderLoanPaymentLog();
+  return payment;
+}
+
+function logLoanPayment() {
+  const amt = document.getElementById('loanPayAmt').value;
+  const note = document.getElementById('loanPayNote').value;
+  const payment = applyLoanPayment(amt, note);
+  if (!payment) return;
+
   document.getElementById('loanPayAmt').value = '';
   document.getElementById('loanPayNote').value = '';
 
-  renderDebtList();
-  renderLoanPaymentLog();
   recalculate();
   saveState();
 }
@@ -1940,15 +1995,25 @@ function renderIncomeList() {
   `).join('');
 }
 
+function applyAdditionalIncome(label, amount, type) {
+  label = (label || '').trim();
+  amount = parseFloat(amount);
+  type = type === 'recurring' ? 'recurring' : 'oneoff';
+  if (!label || !amount || amount <= 0) return null;
+  const item = { label, amount, type };
+  state.additionalIncome.push(item);
+  renderIncomeList();
+  return item;
+}
+
 function addAdditionalIncome() {
-  const label = document.getElementById('incLabel').value.trim();
-  const amount = parseFloat(document.getElementById('incAmount').value);
+  const label = document.getElementById('incLabel').value;
+  const amount = document.getElementById('incAmount').value;
   const type = document.getElementById('incType').value;
-  if (!label || !amount || amount <= 0) return;
-  state.additionalIncome.push({ label, amount, type });
+  const item = applyAdditionalIncome(label, amount, type);
+  if (!item) return;
   document.getElementById('incLabel').value = '';
   document.getElementById('incAmount').value = '';
-  renderIncomeList();
   recalculate();
   saveState();
 }
@@ -2005,12 +2070,22 @@ function renderExpenseList() {
   }).join('');
 }
 
+function applyAdditionalExpense(label, amount, cardIndex, note) {
+  label = (label || '').trim();
+  amount = parseFloat(amount);
+  cardIndex = parseInt(cardIndex);
+  if (isNaN(cardIndex)) cardIndex = -1;
+  if (!label || !amount || amount <= 0) return null;
+  const item = { label, amount, cardIndex, note: (note || '').trim() };
+  state.additionalExpenses.push(item);
+  renderExpenseList();
+  return item;
+}
+
 function addAdditionalExpense() {
-  const label = document.getElementById('expLabel').value.trim();
-  const amount = parseFloat(document.getElementById('expAmount').value);
-  const cardIndex = parseInt(document.getElementById('expCard').value);
-  const note = document.getElementById('expNote').value.trim();
-  if (!label || !amount || amount <= 0) return;
+  const label = document.getElementById('expLabel').value;
+  const amount = document.getElementById('expAmount').value;
+  const note = document.getElementById('expNote').value;
 
   // If user picked "Add new card"
   if (document.getElementById('expCard').value === 'new') {
@@ -2023,11 +2098,12 @@ function addAdditionalExpense() {
     return;
   }
 
-  state.additionalExpenses.push({ label, amount, cardIndex, note });
+  const cardIndex = document.getElementById('expCard').value;
+  const item = applyAdditionalExpense(label, amount, cardIndex, note);
+  if (!item) return;
   document.getElementById('expLabel').value = '';
   document.getElementById('expAmount').value = '';
   document.getElementById('expNote').value = '';
-  renderExpenseList();
   recalculate();
   saveState();
 }
@@ -2037,6 +2113,292 @@ function removeAdditionalExpense(i) {
   renderExpenseList();
   recalculate();
   saveState();
+}
+
+// ═══════════════════════════════════════════════
+// SHARED — Anthropic API key (used by AI assistant + statement analyzer)
+// ═══════════════════════════════════════════════
+function getApiKey() {
+  let apiKey = localStorage.getItem('fcc_anthropic_key');
+  if (!apiKey) {
+    apiKey = prompt('Enter your Anthropic API key.\n\nGet one free at console.anthropic.com → API Keys.\n\nIt will be saved in your browser only.');
+    if (!apiKey || apiKey.trim().length < 20) return null;
+    localStorage.setItem('fcc_anthropic_key', apiKey.trim());
+  }
+  return apiKey.trim();
+}
+
+// ═══════════════════════════════════════════════
+// AI CHAT ASSISTANT — parses natural-language financial updates
+// ═══════════════════════════════════════════════
+function applyIncomeUpdate(amount) {
+  amount = parseFloat(amount);
+  if (isNaN(amount) || amount < 0) return null;
+  state.income = Math.round(amount);
+  document.getElementById('incomeInput').value = state.income;
+  return state.income;
+}
+
+function applyFixedCosts(condo, otherFixed) {
+  const parts = [];
+  if (condo !== undefined && condo !== null && !isNaN(parseFloat(condo))) {
+    state.condo = Math.round(parseFloat(condo));
+    parts.push(`condo ฿${state.condo.toLocaleString()}`);
+  }
+  if (otherFixed !== undefined && otherFixed !== null && !isNaN(parseFloat(otherFixed))) {
+    state.otherFixed = Math.round(parseFloat(otherFixed));
+    parts.push(`other fixed ฿${state.otherFixed.toLocaleString()}`);
+  }
+  return parts;
+}
+
+function applyBudgetCategory(nameQuery, amount) {
+  amount = parseFloat(amount);
+  if (!nameQuery || isNaN(amount) || amount < 0) return null;
+  const q = String(nameQuery).toLowerCase();
+  const idx = state.budgetItems.findIndex(b => b.name.toLowerCase().includes(q) || q.includes(b.name.toLowerCase()));
+  if (idx === -1) return null;
+  const item = state.budgetItems[idx];
+  if (amount > item.max) item.max = Math.round(amount);
+  item.amount = Math.round(amount);
+  renderBudgetSliders();
+  return item;
+}
+
+function applySavingsTargets(updates) {
+  const parts = [];
+  if (updates.emergency !== undefined && updates.emergency !== null && !isNaN(parseFloat(updates.emergency))) {
+    state.emergency = Math.round(parseFloat(updates.emergency));
+    document.getElementById('emergencyInput').value = state.emergency;
+    parts.push(`emergency ฿${state.emergency.toLocaleString()}`);
+  }
+  if (updates.invest !== undefined && updates.invest !== null && !isNaN(parseFloat(updates.invest))) {
+    state.invest = Math.round(parseFloat(updates.invest));
+    document.getElementById('investInput').value = state.invest;
+    parts.push(`invest ฿${state.invest.toLocaleString()}`);
+  }
+  if (updates.extraDebt !== undefined && updates.extraDebt !== null && !isNaN(parseFloat(updates.extraDebt))) {
+    state.extraDebt = Math.round(parseFloat(updates.extraDebt));
+    document.getElementById('extraDebtInput').value = state.extraDebt;
+    parts.push(`extra debt payment ฿${state.extraDebt.toLocaleString()}`);
+  }
+  return parts;
+}
+
+const CHAT_TOOLS = [
+  {
+    name: 'update_income',
+    description: "Update the user's base monthly income (net take-home pay).",
+    input_schema: { type: 'object', properties: {
+      amount: { type: 'number', description: 'New monthly income in THB' }
+    }, required: ['amount'] }
+  },
+  {
+    name: 'update_fixed_costs',
+    description: 'Update recurring fixed monthly costs like rent/condo or other fixed bills (utilities, phone, insurance, subscriptions).',
+    input_schema: { type: 'object', properties: {
+      condo: { type: 'number', description: 'Monthly rent/condo/housing payment in THB' },
+      otherFixed: { type: 'number', description: 'Other fixed monthly costs in THB' }
+    } }
+  },
+  {
+    name: 'adjust_budget_category',
+    description: 'Set the monthly spending amount for one of the variable budget categories: Food & Dining, Transport & Fuel, Shopping & Personal, Health & Wellness, Entertainment, Miscellaneous. Use this for both raising and lowering a category, and for logging that money was spent in a category this month (add to the current amount yourself using the state snapshot).',
+    input_schema: { type: 'object', properties: {
+      category: { type: 'string', description: 'Which category to change, e.g. "Food & Dining"' },
+      amount: { type: 'number', description: 'New total monthly amount in THB for that category' }
+    }, required: ['category', 'amount'] }
+  },
+  {
+    name: 'log_loan_payment',
+    description: 'Log a payment made toward the personal loan, reducing its remaining balance.',
+    input_schema: { type: 'object', properties: {
+      amount: { type: 'number' },
+      note: { type: 'string' }
+    }, required: ['amount'] }
+  },
+  {
+    name: 'add_additional_income',
+    description: 'Add a one-off or recurring additional income source on top of base salary (bonus, gift, freelance, etc).',
+    input_schema: { type: 'object', properties: {
+      label: { type: 'string' },
+      amount: { type: 'number' },
+      type: { type: 'string', enum: ['oneoff', 'recurring'] }
+    }, required: ['label', 'amount', 'type'] }
+  },
+  {
+    name: 'add_additional_expense',
+    description: 'Add a one-off unplanned expense outside the normal budget categories (e.g. car repair, doctor visit).',
+    input_schema: { type: 'object', properties: {
+      label: { type: 'string' },
+      amount: { type: 'number' },
+      note: { type: 'string' }
+    }, required: ['label', 'amount'] }
+  },
+  {
+    name: 'add_project',
+    description: 'Add a new savings goal / financial project (e.g. travel, gadget, housing).',
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string' },
+      target: { type: 'number' },
+      months: { type: 'number' },
+      saved: { type: 'number' },
+      icon: { type: 'string', description: 'One emoji: ✈ Travel, 🏠 Housing, 📱 Gadget, 🎓 Education, 🚗 Vehicle, 💊 Health, 🎁 Other' }
+    }, required: ['name', 'target', 'months'] }
+  },
+  {
+    name: 'update_savings_targets',
+    description: 'Update monthly savings/investment allocation targets: emergency fund, investment (SSF/RMF), and extra loan payment.',
+    input_schema: { type: 'object', properties: {
+      emergency: { type: 'number' },
+      invest: { type: 'number' },
+      extraDebt: { type: 'number' }
+    } }
+  }
+];
+
+function buildStateSnapshot() {
+  return {
+    income: state.income,
+    condo: state.condo,
+    otherFixed: state.otherFixed,
+    budgetItems: state.budgetItems.map(b => ({ name: b.name, amount: b.amount })),
+    debts: state.debts.map(d => ({ bank: d.bank, balance: Math.round(d.balance), min: d.min })),
+    emergency: state.emergency,
+    invest: state.invest,
+    extraDebt: state.extraDebt,
+    additionalIncome: state.additionalIncome,
+    additionalExpenses: state.additionalExpenses,
+    projects: state.projects.map(p => ({ name: p.name, target: p.target, saved: p.saved, months: p.months }))
+  };
+}
+
+function executeChatTool(name, input) {
+  switch (name) {
+    case 'update_income': {
+      const v = applyIncomeUpdate(input.amount);
+      return v !== null ? `Income set to ฿${v.toLocaleString()}` : null;
+    }
+    case 'update_fixed_costs': {
+      const parts = applyFixedCosts(input.condo, input.otherFixed);
+      return parts.length ? `Updated ${parts.join(', ')}` : null;
+    }
+    case 'adjust_budget_category': {
+      const item = applyBudgetCategory(input.category, input.amount);
+      return item ? `${item.name} budget set to ฿${item.amount.toLocaleString()}` : null;
+    }
+    case 'log_loan_payment': {
+      const p = applyLoanPayment(input.amount, input.note);
+      return p ? `Logged loan payment of ฿${p.amount.toLocaleString()}${p.note ? ' (' + p.note + ')' : ''}` : null;
+    }
+    case 'add_additional_income': {
+      const item = applyAdditionalIncome(input.label, input.amount, input.type);
+      return item ? `Added income "${item.label}" +฿${item.amount.toLocaleString()} (${item.type})` : null;
+    }
+    case 'add_additional_expense': {
+      const item = applyAdditionalExpense(input.label, input.amount, -1, input.note);
+      return item ? `Added expense "${item.label}" −฿${item.amount.toLocaleString()}` : null;
+    }
+    case 'add_project': {
+      const p = applyProject(input.name, input.icon, input.target, input.months, input.saved || 0);
+      return p ? `Added project "${p.name}" — target ฿${p.target.toLocaleString()} over ${p.months}mo` : null;
+    }
+    case 'update_savings_targets': {
+      const parts = applySavingsTargets(input);
+      return parts.length ? `Updated ${parts.join(', ')}` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+let chatHistory = [];
+
+function appendChatMessage(role, text) {
+  const log = document.getElementById('chatLog');
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble ' + role;
+  bubble.textContent = text;
+  log.appendChild(bubble);
+  log.scrollTop = log.scrollHeight;
+  return bubble;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+
+  appendChatMessage('user', text);
+  input.value = '';
+  const sendBtn = document.getElementById('chatSendBtn');
+  sendBtn.disabled = true;
+  const thinkingEl = appendChatMessage('assistant thinking', '…');
+
+  chatHistory.push({ role: 'user', content: text });
+
+  try {
+    const systemPrompt = `You are a financial assistant embedded in the user's personal finance dashboard (all amounts in THB). Current state snapshot:\n${JSON.stringify(buildStateSnapshot())}\n\nWhen the user describes a financial update (spending, income change, a loan payment, a new savings goal, an unplanned expense, etc.), call the appropriate tool(s) to apply it — you can call several tools in one turn if the message describes multiple updates. For adjust_budget_category, the "amount" is the NEW TOTAL for that category, so if the user says they spent an extra amount, add it to the current amount from the snapshot yourself. If an amount or detail is ambiguous or missing, ask a short clarifying question in text instead of guessing. After tool calls, do not repeat a confirmation in text — the app shows one automatically.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 1024,
+        system: systemPrompt,
+        tools: CHAT_TOOLS,
+        messages: chatHistory
+      })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || JSON.stringify(errBody);
+      if (response.status === 401) {
+        localStorage.removeItem('fcc_anthropic_key');
+        throw new Error('Invalid API key — cleared. Re-enter and try again.');
+      }
+      throw new Error(`API error ${response.status}: ${errMsg}`);
+    }
+
+    const data = await response.json();
+    thinkingEl.remove();
+
+    chatHistory.push({ role: 'assistant', content: data.content });
+
+    const textBlocks = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+    const toolBlocks = data.content.filter(b => b.type === 'tool_use');
+
+    const changeSummaries = [];
+    if (toolBlocks.length > 0) {
+      const toolResults = toolBlocks.map(tool => {
+        const summary = executeChatTool(tool.name, tool.input);
+        changeSummaries.push(summary || `Could not apply ${tool.name} — missing or invalid data`);
+        return { type: 'tool_result', tool_use_id: tool.id, content: summary || 'Failed: missing or invalid data' };
+      });
+      chatHistory.push({ role: 'user', content: toolResults });
+      recalculate();
+      saveState();
+    }
+
+    if (changeSummaries.length > 0) appendChatMessage('assistant', '✓ ' + changeSummaries.join(' · '));
+    if (textBlocks) appendChatMessage('assistant', textBlocks);
+    if (changeSummaries.length === 0 && !textBlocks) appendChatMessage('assistant', '(No changes made — try rephrasing.)');
+
+  } catch (err) {
+    thinkingEl.remove();
+    appendChatMessage('assistant', '✗ ' + err.message);
+  } finally {
+    sendBtn.disabled = false;
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -2174,23 +2536,19 @@ Return ONLY a JSON object, no other text, no markdown. Format:
     status.textContent = 'Sending to Claude AI…';
 
     // Get API key — stored locally so user only enters once
-    let apiKey = localStorage.getItem('fcc_anthropic_key');
+    const apiKey = getApiKey();
     if (!apiKey) {
-      apiKey = prompt('Enter your Anthropic API key to enable statement analysis.\n\nGet one free at console.anthropic.com → API Keys.\n\nIt will be saved in your browser only.');
-      if (!apiKey || apiKey.trim().length < 20) {
-        status.textContent = 'API key required — try again';
-        btn.textContent = '✦ Analyze with AI';
-        btn.disabled = false;
-        return;
-      }
-      localStorage.setItem('fcc_anthropic_key', apiKey.trim());
+      status.textContent = 'API key required — try again';
+      btn.textContent = '✦ Analyze with AI';
+      btn.disabled = false;
+      return;
     }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey.trim(),
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
