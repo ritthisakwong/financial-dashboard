@@ -749,9 +749,25 @@
     /* Loan payment row */
     .loan-pay-row { flex-direction: column !important; }
   }
+
+  /* Password gate */
+  body:not(.fcc-authed) > *:not(#passGate) { display: none !important; }
+  body.fcc-authed #passGate { display: none !important; }
 </style>
 </head>
 <body>
+
+<!-- Password Gate -->
+<div id="passGate" style="position:fixed; inset:0; background:var(--bg); z-index:9999; display:flex; align-items:center; justify-content:center; padding:20px;">
+  <form id="gatePwForm" style="background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:36px 32px; width:100%; max-width:340px; text-align:center;">
+    <div style="font-family:'DM Serif Display',serif; font-size:1.4rem; color:var(--text); margin-bottom:6px;">Financial <span style="color:var(--accent); font-style:italic;">Command</span></div>
+    <div style="font-family:'DM Mono',monospace; font-size:0.68rem; color:var(--text-dim); letter-spacing:0.1em; text-transform:uppercase; margin-bottom:24px;">Enter password to continue</div>
+    <input type="password" id="gatePwInput" placeholder="Password" autocomplete="current-password" style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:'DM Mono',monospace; font-size:0.9rem; padding:10px 14px; outline:none; text-align:center; margin-bottom:12px; box-sizing:border-box;">
+    <button type="submit" class="btn btn-primary" style="width:100%; padding:10px; font-size:0.8rem;">Unlock</button>
+    <div id="gateError" style="display:none; color:var(--danger); font-family:'DM Mono',monospace; font-size:0.72rem; margin-top:12px;">Incorrect password</div>
+  </form>
+</div>
+
 <div class="app">
 
   <!-- Header -->
@@ -1203,6 +1219,36 @@
 </div>
 
 <script>
+// ═══════════════════════════════════════════════
+// PASSWORD GATE
+// ═══════════════════════════════════════════════
+const GATE_HASH = '15709ddb85aeb10a876de30933b7da28e7489325040756382e09479eb1dbde7a';
+const GATE_KEY = 'fcc_gate_ok';
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+if (localStorage.getItem(GATE_KEY) === '1') {
+  document.body.classList.add('fcc-authed');
+}
+
+document.getElementById('gatePwForm').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const val = document.getElementById('gatePwInput').value;
+  const hash = await sha256Hex(val);
+  if (hash === GATE_HASH) {
+    localStorage.setItem(GATE_KEY, '1');
+    document.getElementById('gateError').style.display = 'none';
+    document.body.classList.add('fcc-authed');
+  } else {
+    document.getElementById('gateError').style.display = 'block';
+    document.getElementById('gatePwInput').value = '';
+    document.getElementById('gatePwInput').focus();
+  }
+});
+
 // ═══════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════
