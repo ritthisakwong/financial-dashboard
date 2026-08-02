@@ -1063,6 +1063,28 @@
       </div>
     </div>
 
+    <!-- Investments -->
+    <div class="card">
+      <div class="card-title">
+        Investments
+        <span class="dot"></span>
+      </div>
+      <div class="free-cash-display">
+        <div class="big-num" id="investTotalBig">฿0</div>
+        <div class="sub">total portfolio value</div>
+      </div>
+      <div style="text-align:center; margin-top:-4px; margin-bottom:4px;">
+        <span style="font-family:'DM Mono',monospace; font-size:0.85rem;" id="investGainLoss">฿0 (0%)</span>
+      </div>
+      <div class="divider"></div>
+      <div class="donut-wrap" id="investDonutWrap" style="display:none;">
+        <svg class="donut" id="investDonut" width="100" height="100" viewBox="0 0 100 100"></svg>
+        <div class="donut-legend" id="investLegend"></div>
+      </div>
+      <div class="projects-section" id="investList"><!-- Rendered by JS --></div>
+      <button class="add-project-btn" onclick="openInvestmentModal()">+ Add Holding</button>
+    </div>
+
   </div>
 
   <!-- Bottom: Health Score -->
@@ -1254,6 +1276,44 @@
   </div>
 </div>
 
+<!-- Add Investment Modal -->
+<div class="modal-overlay" id="investmentModal">
+  <div class="modal">
+    <h3>Add Holding</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="invName" placeholder="e.g. PTT or SCB Global Fund">
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="invType">
+          <option value="stock">Stock</option>
+          <option value="fund">Fund</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Account / Broker (optional)</label>
+      <input type="text" id="invAccount" placeholder="e.g. SCB, Bualuang Securities">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Cost Basis (THB)</label>
+        <input type="number" id="invCost" placeholder="Total ever put in">
+      </div>
+      <div class="form-group">
+        <label>Current Value (THB)</label>
+        <input type="number" id="invCurrent" placeholder="What it's worth now">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeInvestmentModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="addInvestment()">Add Holding</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════
 // PASSWORD GATE
@@ -1311,7 +1371,8 @@ const state = {
   loanPayments: [],      // { date, amount, note }
   additionalIncome: [],  // { label, amount, type: 'recurring'|'oneoff' }
   additionalExpenses: [], // { label, amount, cardIndex: -1=cash, note }
-  creditCards: []        // { bank, last4, balance, min } — user-added cards
+  creditCards: [],        // { bank, last4, balance, min } — user-added cards
+  investments: []         // { id, name, ticker, type: 'stock'|'fund', account, costBasis, currentValue, lastUpdated }
 };
 
 // ═══════════════════════════════════════════════
@@ -1541,6 +1602,13 @@ function recalculate() {
   // Re-render debt list so payoff tracker reflects latest extra payment
   renderDebtList();
   renderLoanPaymentLog();
+  renderInvestments();
+
+  // Investments — total value computed here (not buried in the card render fn)
+  // so a future "Net Worth" feature can reuse it directly.
+  const totalInvestmentValue = state.investments.reduce((s, i) => s + i.currentValue, 0);
+  const totalInvestmentCost = state.investments.reduce((s, i) => s + i.costBasis, 0);
+  const investmentGainPct = totalInvestmentCost > 0 ? ((totalInvestmentValue - totalInvestmentCost) / totalInvestmentCost) * 100 : 0;
 
   // Additional income (recurring only counts every month; one-off only this month)
   const totalAddIncome = state.additionalIncome.reduce((s, i) => s + i.amount, 0);
@@ -1644,6 +1712,10 @@ function recalculate() {
       <div class="health-indicator" style="background:${freeCash >= 0 ? 'var(--accent)' : 'var(--danger)'}"></div>
       <div class="health-text">Monthly balance: <strong>${freeCash >= 0 ? 'positive' : 'OVERSPENDING'}</strong></div>
     </div>
+    <div class="health-row">
+      <div class="health-indicator" style="background:${totalInvestmentValue > 0 ? (investmentGainPct >= 0 ? 'var(--accent)' : 'var(--danger)') : 'var(--text-dim)'}"></div>
+      <div class="health-text">Investments: <strong>${totalInvestmentValue > 0 ? '฿' + Math.round(totalInvestmentValue).toLocaleString() + ' (' + (investmentGainPct >= 0 ? '+' : '') + investmentGainPct.toFixed(1) + '%)' : 'none yet'}</strong></div>
+    </div>
   `;
 
   // Tips
@@ -1716,6 +1788,188 @@ function removeProject(i) {
 }
 
 // ═══════════════════════════════════════════════
+// INVESTMENTS — tracked by total value, not shares/NAV
+// ═══════════════════════════════════════════════
+function openInvestmentModal() {
+  document.getElementById('investmentModal').classList.add('active');
+}
+
+function closeInvestmentModal() {
+  document.getElementById('investmentModal').classList.remove('active');
+}
+
+// Core mutation — usable by both the manual form and the AI chat assistant
+function applyInvestmentHolding(name, type, account, costBasis, currentValue, ticker) {
+  name = (name || '').trim();
+  type = (type || '').toLowerCase().trim();
+  if (!name || (type !== 'stock' && type !== 'fund')) return null;
+  costBasis = parseFloat(costBasis);
+  if (isNaN(costBasis) || costBasis < 0) costBasis = 0;
+  currentValue = parseFloat(currentValue);
+  if (isNaN(currentValue) || currentValue < 0) currentValue = 0;
+  const holding = {
+    id: 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    name,
+    ticker: (ticker || '').trim(),
+    type,
+    account: (account || '').trim(),
+    costBasis: Math.round(costBasis),
+    currentValue: Math.round(currentValue),
+    lastUpdated: new Date().toISOString().slice(0, 10)
+  };
+  state.investments.push(holding);
+  renderInvestments();
+  return holding;
+}
+
+function addInvestment() {
+  const name = document.getElementById('invName').value;
+  const type = document.getElementById('invType').value;
+  const account = document.getElementById('invAccount').value;
+  const costBasis = document.getElementById('invCost').value;
+  const currentValue = document.getElementById('invCurrent').value;
+
+  const holding = applyInvestmentHolding(name, type, account, costBasis, currentValue);
+  if (!holding) return;
+  closeInvestmentModal();
+  recalculate();
+  saveState();
+
+  // Reset
+  document.getElementById('invName').value = '';
+  document.getElementById('invAccount').value = '';
+  document.getElementById('invCost').value = '';
+  document.getElementById('invCurrent').value = '';
+}
+
+function removeInvestment(i) {
+  state.investments.splice(i, 1);
+  renderInvestments();
+  recalculate();
+  saveState();
+}
+
+// Fuzzy-matches an existing holding by name/ticker (case-insensitive substring),
+// same approach as applyBudgetCategory() uses for category names.
+function applyInvestmentValueUpdate(nameQuery, newValue) {
+  newValue = parseFloat(newValue);
+  if (!nameQuery || isNaN(newValue) || newValue < 0) return null;
+  const q = String(nameQuery).toLowerCase();
+  const idx = state.investments.findIndex(h => {
+    const n = h.name.toLowerCase();
+    const t = (h.ticker || '').toLowerCase();
+    return n.includes(q) || q.includes(n) || (t && (t.includes(q) || q.includes(t)));
+  });
+  if (idx === -1) return null;
+  const holding = state.investments[idx];
+  holding.currentValue = Math.round(newValue);
+  holding.lastUpdated = new Date().toISOString().slice(0, 10);
+  renderInvestments();
+  return holding;
+}
+
+function promptUpdateInvestmentValue(i) {
+  const holding = state.investments[i];
+  if (!holding) return;
+  const input = prompt(`New current value for "${holding.name}" (THB):`, holding.currentValue);
+  if (input === null) return;
+  const num = parseFloat(input);
+  if (isNaN(num) || num < 0) return;
+  holding.currentValue = Math.round(num);
+  holding.lastUpdated = new Date().toISOString().slice(0, 10);
+  renderInvestments();
+  recalculate();
+  saveState();
+}
+
+function renderInvestments() {
+  const totalCost = state.investments.reduce((s, h) => s + h.costBasis, 0);
+  const totalValue = state.investments.reduce((s, h) => s + h.currentValue, 0);
+  const gain = totalValue - totalCost;
+  const gainPct = totalCost > 0 ? (gain / totalCost) * 100 : 0;
+  const gainColor = gain > 0 ? 'var(--accent)' : gain < 0 ? 'var(--danger)' : 'var(--text-mid)';
+  const sign = gain > 0 ? '+' : gain < 0 ? '−' : '';
+
+  const bigEl = document.getElementById('investTotalBig');
+  if (bigEl) bigEl.textContent = '฿' + Math.round(totalValue).toLocaleString();
+
+  const glEl = document.getElementById('investGainLoss');
+  if (glEl) {
+    glEl.textContent = `${sign}฿${Math.abs(Math.round(gain)).toLocaleString()} (${sign}${Math.abs(gainPct).toFixed(1)}%)`;
+    glEl.style.color = gainColor;
+  }
+
+  // Donut + legend — by holding (few holdings) or by type (many holdings)
+  const donutWrap = document.getElementById('investDonutWrap');
+  const donut = document.getElementById('investDonut');
+  const legend = document.getElementById('investLegend');
+  if (donutWrap && donut && legend) {
+    if (state.investments.length === 0 || totalValue <= 0) {
+      donutWrap.style.display = 'none';
+    } else {
+      donutWrap.style.display = 'flex';
+      const palette = ['var(--accent)', 'var(--accent2)', 'var(--accent3)', 'var(--danger)', '#9d7ce0', '#e07ca0', '#7ce0c8'];
+      let segments;
+      if (state.investments.length <= 6) {
+        segments = state.investments.map(h => ({ label: h.name, value: h.currentValue }));
+      } else {
+        const byType = {};
+        state.investments.forEach(h => { byType[h.type] = (byType[h.type] || 0) + h.currentValue; });
+        segments = Object.entries(byType).map(([type, value]) => ({ label: type === 'fund' ? 'Funds' : 'Stocks', value }));
+      }
+      const r = 40, circumference = 2 * Math.PI * r;
+      let offset = 0, circles = '', legendHtml = '';
+      segments.forEach((seg, i) => {
+        const pct = seg.value / totalValue;
+        const dash = pct * circumference;
+        const color = palette[i % palette.length];
+        circles += `<circle cx="50" cy="50" r="${r}" fill="none" stroke="${color}" stroke-width="14" stroke-dasharray="${dash} ${circumference - dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 50 50)"></circle>`;
+        offset += dash;
+        legendHtml += `
+          <div class="legend-item">
+            <span class="legend-dot" style="background:${color}"></span>
+            <span class="legend-label">${seg.label}</span>
+            <span class="legend-pct">${Math.round(pct * 100)}%</span>
+          </div>`;
+      });
+      donut.innerHTML = circles;
+      legend.innerHTML = legendHtml;
+    }
+  }
+
+  // Holdings list
+  const listEl = document.getElementById('investList');
+  if (!listEl) return;
+  if (state.investments.length === 0) {
+    listEl.innerHTML = `<div style="font-size:0.8rem; color:var(--text-dim); text-align:center; padding:16px 0;">No holdings yet — add a stock or fund.</div>`;
+    return;
+  }
+  listEl.innerHTML = state.investments.map((h, i) => {
+    const hGain = h.currentValue - h.costBasis;
+    const hPct = h.costBasis > 0 ? (hGain / h.costBasis) * 100 : 0;
+    const hSign = hGain > 0 ? '+' : hGain < 0 ? '−' : '';
+    const hColor = hGain > 0 ? 'var(--accent)' : hGain < 0 ? 'var(--danger)' : 'var(--text-mid)';
+    const hBg = hGain > 0 ? 'rgba(200,240,100,0.1)' : hGain < 0 ? 'rgba(240,100,100,0.1)' : 'rgba(176,173,168,0.1)';
+    const hBorder = hGain > 0 ? 'rgba(200,240,100,0.2)' : hGain < 0 ? 'rgba(240,100,100,0.2)' : 'rgba(176,173,168,0.2)';
+    const icon = h.type === 'fund' ? '🏦' : '📈';
+    return `
+      <div class="project-item">
+        <div class="project-icon">${icon}</div>
+        <div class="project-info">
+          <div class="project-name">${h.name}${h.ticker ? ` <span style="color:var(--text-dim); font-weight:400;">(${h.ticker})</span>` : ''}</div>
+          <div class="project-detail">${h.account ? h.account + ' · ' : ''}฿${h.costBasis.toLocaleString()} → ฿${h.currentValue.toLocaleString()}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+          <span class="badge" style="background:${hBg}; border-color:${hBorder}; color:${hColor};">${hSign}${Math.abs(hPct).toFixed(1)}%</span>
+          <span style="font-family:'DM Mono',monospace; font-size:0.65rem; color:var(--text-dim); cursor:pointer;" onclick="promptUpdateInvestmentValue(${i})" title="Update current value" onmouseover="this.style.color='var(--accent2)'" onmouseout="this.style.color='var(--text-dim)'">✎ update</span>
+        </div>
+        <button onclick="removeInvestment(${i})" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:1rem; padding:0 4px; transition:color 0.2s;" onmouseover="this.style.color='var(--danger)'" onmouseout="this.style.color='var(--text-dim)'">×</button>
+      </div>
+    `;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
 // THEME
 // ═══════════════════════════════════════════════
 function toggleTheme() {
@@ -1760,7 +2014,8 @@ async function saveState() {
     loanPayments: state.loanPayments,
     additionalIncome: state.additionalIncome,
     additionalExpenses: state.additionalExpenses,
-    creditCards: state.creditCards
+    creditCards: state.creditCards,
+    investments: state.investments
   };
   const payload = JSON.stringify(toSave);
 
@@ -1829,6 +2084,7 @@ async function loadState() {
     state.additionalIncome  = saved.additionalIncome  ?? [];
     state.additionalExpenses= saved.additionalExpenses?? [];
     state.creditCards       = saved.creditCards       ?? [];
+    state.investments       = saved.investments       ?? [];
     return true;
   } catch(e) { return false; }
 }
@@ -2314,6 +2570,25 @@ const CHAT_TOOLS = [
       invest: { type: 'number' },
       extraDebt: { type: 'number' }
     } }
+  },
+  {
+    name: 'add_investment_holding',
+    description: 'Add a new stock or mutual fund holding to the investment portfolio. Tracked by total THB value, not share count or NAV.',
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string', description: 'Name of the stock or fund, e.g. "PTT" or "SCB Global Equity Fund"' },
+      type: { type: 'string', enum: ['stock', 'fund'] },
+      account: { type: 'string', description: 'Broker or account name, optional' },
+      costBasis: { type: 'number', description: 'Total THB ever put into this holding' },
+      currentValue: { type: 'number', description: 'Current total THB value of this holding' }
+    }, required: ['name', 'type'] }
+  },
+  {
+    name: 'update_investment_value',
+    description: 'Update the current total value of an existing stock/fund holding, e.g. when the user reports a new balance or that they bought more.',
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string', description: 'Name or ticker of the holding to update (matched fuzzily against existing holdings)' },
+      newValue: { type: 'number', description: 'New current total THB value for that holding' }
+    }, required: ['name', 'newValue'] }
   }
 ];
 
@@ -2329,7 +2604,8 @@ function buildStateSnapshot() {
     extraDebt: state.extraDebt,
     additionalIncome: state.additionalIncome,
     additionalExpenses: state.additionalExpenses,
-    projects: state.projects.map(p => ({ name: p.name, target: p.target, saved: p.saved, months: p.months }))
+    projects: state.projects.map(p => ({ name: p.name, target: p.target, saved: p.saved, months: p.months })),
+    investments: state.investments.map(h => ({ name: h.name, ticker: h.ticker, type: h.type, account: h.account, costBasis: h.costBasis, currentValue: h.currentValue }))
   };
 }
 
@@ -2366,6 +2642,14 @@ function executeChatTool(name, input) {
     case 'update_savings_targets': {
       const parts = applySavingsTargets(input);
       return parts.length ? `Updated ${parts.join(', ')}` : null;
+    }
+    case 'add_investment_holding': {
+      const item = applyInvestmentHolding(input.name, input.type, input.account, input.costBasis || 0, input.currentValue || 0);
+      return item ? `Added holding "${item.name}" — ฿${item.costBasis.toLocaleString()} → ฿${item.currentValue.toLocaleString()}` : null;
+    }
+    case 'update_investment_value': {
+      const item = applyInvestmentValueUpdate(input.name, input.newValue);
+      return item ? `Updated "${item.name}" current value to ฿${item.currentValue.toLocaleString()}` : null;
     }
     default:
       return null;
@@ -2779,6 +3063,7 @@ async function init() {
   renderBudgetSliders();
   renderDebtList();
   renderProjects();
+  renderInvestments();
   recalculate();
 
   if (didLoad) {
