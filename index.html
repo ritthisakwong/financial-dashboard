@@ -1085,6 +1085,47 @@
       <button class="add-project-btn" onclick="openInvestmentModal()">+ Add Holding</button>
     </div>
 
+    <!-- Net Worth -->
+    <div class="card">
+      <div class="card-title">
+        Net Worth
+        <span class="dot"></span>
+      </div>
+      <div class="free-cash-display">
+        <div class="big-num green" id="netWorthBig">฿0</div>
+        <div class="sub">assets − liabilities</div>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+        <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
+          <span style="color:var(--text-dim)">Cash &amp; Savings</span>
+          <span style="font-family:'DM Mono',monospace; color:var(--accent)" id="netWorthCashDisplay">฿0</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
+          <span style="color:var(--text-dim)">+ Investments</span>
+          <span style="font-family:'DM Mono',monospace; color:var(--accent)" id="netWorthInvestDisplay">฿0</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
+          <span style="color:var(--text-dim)">− Total Debt</span>
+          <span style="font-family:'DM Mono',monospace; color:var(--danger)" id="netWorthDebtDisplay">฿0</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.78rem; border-top:1px solid var(--border); padding-top:6px; margin-top:2px;">
+          <span style="color:var(--text-dim)">= Net Worth</span>
+          <span style="font-family:'DM Mono',monospace; color:var(--text)" id="netWorthEqualsDisplay">฿0</span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="savings-row">
+        <div>
+          <div class="savings-label">Cash &amp; Bank Balance</div>
+          <div class="savings-sub">Actual cash/savings on hand right now</div>
+        </div>
+        <div>
+          <input type="number" style="width:100px; background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:var(--accent); font-family:'DM Mono',monospace; font-size:0.85rem; padding:4px 8px; outline:none; text-align:right;" id="cashBalanceInput" value="0" oninput="recalculate()">
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- Bottom: Health Score -->
@@ -1372,7 +1413,8 @@ const state = {
   additionalIncome: [],  // { label, amount, type: 'recurring'|'oneoff' }
   additionalExpenses: [], // { label, amount, cardIndex: -1=cash, note }
   creditCards: [],        // { bank, last4, balance, min } — user-added cards
-  investments: []         // { id, name, ticker, type: 'stock'|'fund', account, costBasis, currentValue, lastUpdated }
+  investments: [],        // { id, name, ticker, type: 'stock'|'fund', account, costBasis, currentValue, lastUpdated }
+  cashBalance: 0          // actual cash/bank savings on hand right now (manually entered)
 };
 
 // ═══════════════════════════════════════════════
@@ -1598,6 +1640,7 @@ function recalculate() {
   state.emergency = parseInt(document.getElementById('emergencyInput').value) || 0;
   state.invest = parseInt(document.getElementById('investInput').value) || 0;
   state.extraDebt = parseInt(document.getElementById('extraDebtInput').value) || 0;
+  state.cashBalance = parseInt(document.getElementById('cashBalanceInput').value) || 0;
 
   // Re-render debt list so payoff tracker reflects latest extra payment
   renderDebtList();
@@ -1609,6 +1652,19 @@ function recalculate() {
   const totalInvestmentValue = state.investments.reduce((s, i) => s + i.currentValue, 0);
   const totalInvestmentCost = state.investments.reduce((s, i) => s + i.costBasis, 0);
   const investmentGainPct = totalInvestmentCost > 0 ? ((totalInvestmentValue - totalInvestmentCost) / totalInvestmentCost) * 100 : 0;
+
+  // Net Worth = cash on hand + investments − total debt (loans + credit cards)
+  const totalLiabilities = getTotalDebt();
+  const netWorth = state.cashBalance + totalInvestmentValue - totalLiabilities;
+
+  document.getElementById('netWorthCashDisplay').textContent = '฿' + Math.round(state.cashBalance).toLocaleString();
+  document.getElementById('netWorthInvestDisplay').textContent = '฿' + Math.round(totalInvestmentValue).toLocaleString();
+  document.getElementById('netWorthDebtDisplay').textContent = '฿' + Math.round(totalLiabilities).toLocaleString();
+  document.getElementById('netWorthEqualsDisplay').textContent = (netWorth < 0 ? '−' : '') + '฿' + Math.abs(Math.round(netWorth)).toLocaleString();
+
+  const netWorthEl = document.getElementById('netWorthBig');
+  netWorthEl.textContent = (netWorth < 0 ? '−' : '') + '฿' + Math.abs(Math.round(netWorth)).toLocaleString();
+  netWorthEl.className = 'big-num ' + (netWorth < 0 ? 'red' : netWorth === 0 ? 'orange' : 'green');
 
   // Additional income (recurring only counts every month; one-off only this month)
   const totalAddIncome = state.additionalIncome.reduce((s, i) => s + i.amount, 0);
@@ -1715,6 +1771,10 @@ function recalculate() {
     <div class="health-row">
       <div class="health-indicator" style="background:${totalInvestmentValue > 0 ? (investmentGainPct >= 0 ? 'var(--accent)' : 'var(--danger)') : 'var(--text-dim)'}"></div>
       <div class="health-text">Investments: <strong>${totalInvestmentValue > 0 ? '฿' + Math.round(totalInvestmentValue).toLocaleString() + ' (' + (investmentGainPct >= 0 ? '+' : '') + investmentGainPct.toFixed(1) + '%)' : 'none yet'}</strong></div>
+    </div>
+    <div class="health-row">
+      <div class="health-indicator" style="background:${netWorth > 0 ? 'var(--accent)' : netWorth === 0 ? 'var(--accent3)' : 'var(--danger)'}"></div>
+      <div class="health-text">Net worth: <strong>${(netWorth < 0 ? '−' : '') + '฿' + Math.abs(Math.round(netWorth)).toLocaleString()}</strong> ${netWorth > 0 ? '(positive)' : netWorth === 0 ? '(breakeven)' : '(negative)'}</div>
     </div>
   `;
 
@@ -2015,7 +2075,8 @@ async function saveState() {
     additionalIncome: state.additionalIncome,
     additionalExpenses: state.additionalExpenses,
     creditCards: state.creditCards,
-    investments: state.investments
+    investments: state.investments,
+    cashBalance: state.cashBalance
   };
   const payload = JSON.stringify(toSave);
 
@@ -2085,6 +2146,7 @@ async function loadState() {
     state.additionalExpenses= saved.additionalExpenses?? [];
     state.creditCards       = saved.creditCards       ?? [];
     state.investments       = saved.investments       ?? [];
+    state.cashBalance       = saved.cashBalance        ?? state.cashBalance;
     return true;
   } catch(e) { return false; }
 }
@@ -2455,6 +2517,14 @@ function applyIncomeUpdate(amount) {
   return state.income;
 }
 
+function applyCashBalance(amount) {
+  amount = parseFloat(amount);
+  if (isNaN(amount) || amount < 0) return null;
+  state.cashBalance = Math.round(amount);
+  document.getElementById('cashBalanceInput').value = state.cashBalance;
+  return state.cashBalance;
+}
+
 function applyFixedCosts(condo, otherFixed) {
   const parts = [];
   if (condo !== undefined && condo !== null && !isNaN(parseFloat(condo))) {
@@ -2589,6 +2659,13 @@ const CHAT_TOOLS = [
       name: { type: 'string', description: 'Name or ticker of the holding to update (matched fuzzily against existing holdings)' },
       newValue: { type: 'number', description: 'New current total THB value for that holding' }
     }, required: ['name', 'newValue'] }
+  },
+  {
+    name: 'update_cash_balance',
+    description: "Update the user's actual cash/bank savings balance on hand right now (used for net worth), e.g. when they report a new bank balance after checking their account.",
+    input_schema: { type: 'object', properties: {
+      amount: { type: 'number', description: 'New total cash/bank balance in THB' }
+    }, required: ['amount'] }
   }
 ];
 
@@ -2605,7 +2682,9 @@ function buildStateSnapshot() {
     additionalIncome: state.additionalIncome,
     additionalExpenses: state.additionalExpenses,
     projects: state.projects.map(p => ({ name: p.name, target: p.target, saved: p.saved, months: p.months })),
-    investments: state.investments.map(h => ({ name: h.name, ticker: h.ticker, type: h.type, account: h.account, costBasis: h.costBasis, currentValue: h.currentValue }))
+    investments: state.investments.map(h => ({ name: h.name, ticker: h.ticker, type: h.type, account: h.account, costBasis: h.costBasis, currentValue: h.currentValue })),
+    cashBalance: state.cashBalance,
+    totalDebt: getTotalDebt()
   };
 }
 
@@ -2650,6 +2729,10 @@ function executeChatTool(name, input) {
     case 'update_investment_value': {
       const item = applyInvestmentValueUpdate(input.name, input.newValue);
       return item ? `Updated "${item.name}" current value to ฿${item.currentValue.toLocaleString()}` : null;
+    }
+    case 'update_cash_balance': {
+      const v = applyCashBalance(input.amount);
+      return v !== null ? `Cash & bank balance set to ฿${v.toLocaleString()}` : null;
     }
     default:
       return null;
@@ -3057,6 +3140,7 @@ async function init() {
   document.getElementById('emergencyInput').value = state.emergency;
   document.getElementById('investInput').value = state.invest;
   document.getElementById('extraDebtInput').value = state.extraDebt;
+  document.getElementById('cashBalanceInput').value = state.cashBalance;
   document.getElementById('currentMonth').textContent =
     months[state.currentMonth.getMonth()] + ' ' + state.currentMonth.getFullYear();
 
