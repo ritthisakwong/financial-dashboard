@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-08-02T22:37:08",
+  "note": "v1.0.0 baseline: password gate, AI chat assistant, statement analyzer, plus today's additions \u2014 multi-debt/credit-card fix, investments & funds tracker, net worth summary",
+  "version": "1.0.0",
+  "git_branch": "main",
+  "git_head": "e143428",
+  "git_status": "?? .sessions/\n?? PROJECT_INDEX.md\n?? VERSION\n?? financial-dashboard_7.html\n?? session_saver.py",
+  "git_last_commit": "e143428 Add Net Worth summary card",
+  "files_backed_up": [
+    "VERSION",
+    "financial-dashboard_7.html",
+    "index.html",
+    "session_saver.py"
+  ]
+}
