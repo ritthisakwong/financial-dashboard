@@ -931,6 +931,7 @@
         <span class="dot red"></span>
       </div>
       <div id="debtList"><!-- Rendered by JS --></div>
+      <button class="add-project-btn" style="margin-bottom:12px;" onclick="addCardQuick()">+ Add Card</button>
       <div class="divider"></div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <span style="font-family:'DM Mono',monospace; font-size:0.7rem; color:var(--text-dim)">TOTAL DEBT</span>
@@ -1310,7 +1311,7 @@ const state = {
   loanPayments: [],      // { date, amount, note }
   additionalIncome: [],  // { label, amount, type: 'recurring'|'oneoff' }
   additionalExpenses: [], // { label, amount, cardIndex: -1=cash, note }
-  creditCards: []        // { bank, last4, balance } — user-added cards
+  creditCards: []        // { bank, last4, balance, min } — user-added cards
 };
 
 // ═══════════════════════════════════════════════
@@ -1350,10 +1351,14 @@ function updateBudget(i, val) {
 // ═══════════════════════════════════════════════
 // RENDER DEBT LIST
 // ═══════════════════════════════════════════════
+function getTotalDebt() {
+  return state.debts.reduce((s, d) => s + d.balance, 0) + state.creditCards.reduce((s, c) => s + c.balance, 0);
+}
+
 function renderDebtList() {
   const container = document.getElementById('debtList');
-  const total = state.debts.reduce((s, d) => s + d.balance, 0);
-  container.innerHTML = state.debts.map(d => {
+  const total = getTotalDebt();
+  const debtsHtml = state.debts.map(d => {
     if (d.isLoan) {
       const paid = d.originalBalance - d.balance;
       const pct = Math.min(100, Math.round((paid / d.originalBalance) * 100));
@@ -1417,7 +1422,52 @@ function renderDebtList() {
       </div>
     `;
   }).join('');
+  const cardsHtml = state.creditCards.map((c, i) => `
+      <div class="debt-item">
+        <div class="debt-left">
+          <span class="debt-bank">${c.bank}</span>
+          <span class="debt-card-name">···${c.last4}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div class="debt-right">
+            <span class="debt-balance">฿${Math.round(c.balance).toLocaleString()}</span>
+            <span class="debt-min">min ฿${Math.round(c.min).toLocaleString()}</span>
+          </div>
+          <button onclick="removeCard(${i})" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:1rem; padding:0 4px; transition:color 0.2s;" onmouseover="this.style.color='var(--danger)'" onmouseout="this.style.color='var(--text-dim)'">×</button>
+        </div>
+      </div>
+    `).join('');
+  container.innerHTML = debtsHtml + cardsHtml;
   document.getElementById('totalDebtDisplay').textContent = '฿' + Math.round(total).toLocaleString();
+}
+
+function removeCard(i) {
+  state.creditCards.splice(i, 1);
+  populateCardDropdown();
+  renderDebtList();
+  recalculate();
+  saveState();
+}
+
+function addCardQuick() {
+  const bank = prompt('Bank name (e.g. KTC, CardX):');
+  if (!bank) return;
+  const last4 = prompt('Last 4 digits of card:');
+  if (!last4) return;
+  const balanceInput = prompt('Current balance (฿):', '0');
+  if (balanceInput === null) return;
+  const minInput = prompt('Minimum monthly payment (฿):', '0');
+  if (minInput === null) return;
+  state.creditCards.push({
+    bank: bank.trim(),
+    last4: last4.trim(),
+    balance: parseFloat(balanceInput) || 0,
+    min: parseFloat(minInput) || 0
+  });
+  populateCardDropdown();
+  renderDebtList();
+  recalculate();
+  saveState();
 }
 
 // ═══════════════════════════════════════════════
@@ -1505,7 +1555,7 @@ function recalculate() {
   const addExpDisplay = document.getElementById('addExpenseDisplay');
   if (addExpDisplay) addExpDisplay.textContent = '฿' + totalAddExpenses.toLocaleString();
 
-  const totalMinimums = state.debts.reduce((s, d) => s + d.min, 0);
+  const totalMinimums = state.debts.reduce((s, d) => s + d.min, 0) + state.creditCards.reduce((s, c) => s + c.min, 0);
   const totalFixed = state.condo + state.otherFixed;
   const totalSavings = state.emergency + state.invest + state.extraDebt;
   const totalVariable = state.budgetItems.reduce((s, b) => s + b.amount, 0);
@@ -2092,8 +2142,18 @@ function addAdditionalExpense() {
     const bank = prompt('Bank name (e.g. KTC, CardX):');
     const last4 = prompt('Last 4 digits of card:');
     if (bank && last4) {
-      state.creditCards.push({ bank: bank.trim(), last4: last4.trim(), balance: 0 });
+      const balanceInput = prompt('Current balance (฿):', '0');
+      const minInput = prompt('Minimum monthly payment (฿):', '0');
+      state.creditCards.push({
+        bank: bank.trim(),
+        last4: last4.trim(),
+        balance: parseFloat(balanceInput) || 0,
+        min: parseFloat(minInput) || 0
+      });
       populateCardDropdown();
+      renderDebtList();
+      recalculate();
+      saveState();
     }
     return;
   }
