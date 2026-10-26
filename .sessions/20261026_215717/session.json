@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-10-26T21:57:17",
+  "note": "v1.1.0: statement analyzer accepts JPG, PNG, HEIC, WEBP, GIF images",
+  "version": "1.1.0",
+  "git_branch": "main",
+  "git_head": "10afaf3",
+  "git_status": "M VERSION\n?? .sessions/20261026_215717/",
+  "git_last_commit": "10afaf3 Statement analyzer: accept JPG, PNG, HEIC, WEBP and GIF images",
+  "files_backed_up": [
+    "VERSION",
+    "financial-dashboard_7.html",
+    "index.html",
+    "session_saver.py"
+  ]
+}
