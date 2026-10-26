@@ -1166,9 +1166,9 @@
       ondragleave="this.style.borderColor='var(--border)'"
       ondrop="handleDrop(event)">
       <div style="font-size:2rem; margin-bottom:8px;">📄</div>
-      <div style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--text-mid);">Drop statement PDFs here or click to select</div>
+      <div style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--text-mid);">Drop statement PDFs or photos/screenshots (JPG, PNG, HEIC) here or click to select</div>
       <div style="font-family:'DM Mono',monospace; font-size:0.68rem; color:var(--text-dim); margin-top:6px;">KTC · CardX · TTB · UOB — multiple files supported</div>
-      <input type="file" id="statementFiles" accept=".pdf" multiple style="display:none" onchange="handleFileSelect(this.files)">
+      <input type="file" id="statementFiles" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.heic,.heif,application/pdf,image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif" multiple style="display:none" onchange="handleFileSelect(this.files)">
     </div>
 
     <!-- File queue -->
@@ -2852,13 +2852,40 @@ const CATEGORY_COLORS = [
 function handleDrop(e) {
   e.preventDefault();
   document.getElementById('uploadZone').style.borderColor = 'var(--border)';
-  const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.pdf'));
-  if (files.length) handleFileSelect(files);
+  handleFileSelect(e.dataTransfer.files);
+}
+
+// Statement file types the AI can read: PDFs as documents, the rest as images
+const STATEMENT_IMAGE_TYPES = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif'
+};
+
+// iPhone photos — the API can't take these directly, so they're converted to JPEG first
+const STATEMENT_HEIC_TYPES = ['heic', 'heif', 'image/heic', 'image/heif'];
+
+function isHeicFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  return STATEMENT_HEIC_TYPES.includes(ext) || STATEMENT_HEIC_TYPES.includes(file.type);
+}
+
+function statementFileKind(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'pdf' || file.type === 'application/pdf') return 'pdf';
+  if (isHeicFile(file)) return 'image';
+  if (STATEMENT_IMAGE_TYPES[ext] || Object.values(STATEMENT_IMAGE_TYPES).includes(file.type)) return 'image';
+  return null;
 }
 
 function handleFileSelect(files) {
-  queuedFiles = [...queuedFiles, ...Array.from(files)];
+  const all = Array.from(files);
+  const accepted = all.filter(f => statementFileKind(f));
+  const rejected = all.filter(f => !statementFileKind(f));
+  queuedFiles = [...queuedFiles, ...accepted];
   renderFileQueue();
+  if (rejected.length) {
+    alert('Skipped unsupported file(s): ' + rejected.map(f => f.name).join(', ') + '\n\nUse PDF, JPG, PNG, HEIC, WEBP or GIF.');
+  }
+  document.getElementById('statementFiles').value = '';
 }
 
 function renderFileQueue() {
@@ -2868,7 +2895,7 @@ function renderFileQueue() {
   queue.style.display = 'block';
   list.innerHTML = queuedFiles.map((f, i) => `
     <div style="display:flex; align-items:center; gap:10px; background:var(--surface2); border-radius:8px; padding:10px 14px;">
-      <span style="font-size:1rem;">📄</span>
+      <span style="font-size:1rem;">${statementFileKind(f) === 'image' ? '🖼️' : '📄'}</span>
       <span style="flex:1; font-size:0.82rem; color:var(--text);">${f.name}</span>
       <span style="font-family:'DM Mono',monospace; font-size:0.68rem; color:var(--text-dim);">${(f.size/1024).toFixed(0)} KB</span>
       <button onclick="removeFile(${i})" style="background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:1.1rem; padding:0 4px;" onmouseover="this.style.color='var(--danger)'" onmouseout="this.style.color='var(--text-dim)'">×</button>
@@ -2904,6 +2931,70 @@ async function fileToBase64(file) {
   });
 }
 
+// Safari can decode HEIC natively; other browsers need the heic2any library (loaded only when needed)
+let heic2anyPromise = null;
+function loadHeic2any() {
+  if (!heic2anyPromise) {
+    heic2anyPromise = new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+      el.onload = () => resolve(window.heic2any);
+      el.onerror = () => { heic2anyPromise = null; reject(new Error('Could not load the HEIC converter — check your connection')); };
+      document.head.appendChild(el);
+    });
+  }
+  return heic2anyPromise;
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('decode failed'));
+    el.src = src;
+  });
+}
+
+// The API rejects images over 5 MB and downsizes anything larger than ~1568px anyway,
+// so shrink big phone photos before sending. Returns { media_type, data }.
+async function imageToApiSource(file) {
+  const MAX_EDGE = 2000;
+  const MAX_BYTES = 4 * 1024 * 1024;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const mediaType = STATEMENT_IMAGE_TYPES[ext] || file.type;
+
+  const heic = isHeicFile(file);
+  let url = URL.createObjectURL(file);
+  try {
+    let img;
+    try {
+      img = await loadImage(url);
+    } catch (e) {
+      if (!heic) throw new Error('Could not read image ' + file.name);
+      const heic2any = await loadHeic2any();
+      let jpeg = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+      if (Array.isArray(jpeg)) jpeg = jpeg[0];
+      URL.revokeObjectURL(url);
+      url = URL.createObjectURL(jpeg);
+      img = await loadImage(url).catch(() => { throw new Error('Could not read image ' + file.name); });
+    }
+    const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    if (!heic && scale === 1 && file.size <= MAX_BYTES) {
+      return { media_type: mediaType, data: await fileToBase64(file) };
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { media_type: 'image/jpeg', data: canvas.toDataURL('image/jpeg', 0.9).split(',')[1] };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function analyzeStatements() {
   if (queuedFiles.length === 0) return;
 
@@ -2920,7 +3011,7 @@ async function analyzeStatements() {
     // Instruction text FIRST (required by API)
     contentBlocks.push({
       type: 'text',
-      text: `You are analyzing Thai bank credit card statements. Extract ALL transactions (ignore payments/credits, only spending).
+      text: `You are analyzing Thai bank credit card statements. They may be PDFs or photos/screenshots of statement pages — read every one. Several images may be pages of the same statement; do not double-count transactions that appear on more than one image. Extract ALL transactions (ignore payments/credits, only spending).
 
 For each transaction determine the amount in THB (convert foreign currency if shown alongside THB equivalent — use the THB amount).
 
@@ -2950,14 +3041,19 @@ Return ONLY a JSON object, no other text, no markdown. Format:
 }`
     });
 
-    // Add PDF documents AFTER the instruction text
+    // Add PDFs and images AFTER the instruction text
     for (const file of queuedFiles) {
-      const b64 = await fileToBase64(file);
-      contentBlocks.push({
-        type: 'document',
-        source: { type: 'base64', media_type: 'application/pdf', data: b64 },
-        title: file.name.replace('.pdf', '')
-      });
+      if (statementFileKind(file) === 'image') {
+        contentBlocks.push({ type: 'text', text: 'Statement image: ' + file.name });
+        contentBlocks.push({ type: 'image', source: { type: 'base64', ...(await imageToApiSource(file)) } });
+      } else {
+        const b64 = await fileToBase64(file);
+        contentBlocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: b64 },
+          title: file.name.replace(/\.pdf$/i, '')
+        });
+      }
     }
 
     status.textContent = 'Sending to Claude AI…';
